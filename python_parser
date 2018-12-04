@@ -1,0 +1,185 @@
+#Hur stort antal av dessa aktörer finns för problemet.
+param nbutik;
+param ngross;
+param nbrygg;
+param nmatr;
+param nfpack;
+param nlager;
+
+set BUTIK := 1..nbutik;
+set GROSS := 1..ngross;
+set BRYGG := 1..nbrygg;
+set MATR := 1..nmatr;
+set FPACK := 1..nfpack;
+set LAGER := 1..nlager;
+
+#Kapaciteter och behov för de olika aktörerna
+param behov{BUTIK};
+param netto{BUTIK};
+param gkaptom{GROSS};
+param bkaptom{BRYGG};
+param lkaptom{LAGER};
+
+#Summa av behovet hos butiker och det totala spillet
+param totalbehov := sum{i in BUTIK} behov[i];
+param totalnetto := sum{i in BUTIK} netto[i];
+
+#Avståndet i kilometer till mellan aktörer
+param distBuG{BUTIK,GROSS};
+param distBuB{BUTIK,BRYGG};
+param distGB{GROSS,BRYGG};
+param distGR{GROSS};
+param distBR{BRYGG};
+param distTB{FPACK,BRYGG}; #T=Förpackningar
+param distRM{MATR};        #M=Råvaror
+param distMT{MATR,FPACK};
+param distBuL{BUTIK,LAGER};
+param distLR{LAGER};
+
+#Kostnad för frakt av tomma och fulla förpackningar [kr/km] samt materialkostnad
+param tomkost;
+param fullkost;
+param lagkost;
+param matrkop;
+
+#Den maximala kapaciteten för lager
+param maxlager;
+
+#Den fasta kostnaden för grossister, bryggerier och lager
+param fkostG{GROSS};
+param fkostB{BRYGG};
+param fkostL{LAGER};
+
+#Faktorer som påverkar volymen/förpackningarna
+param faktR;
+param faktM;
+param faktF;
+
+#Noder som är med
+var useG{GROSS} binary; #om grossister ska användas
+var useB{BRYGG} binary; #om bryggerier ska användas
+var useL{LAGER} binary; # om mellanlager ska användas
+
+#Flödet mellan noder
+var xBuG{BUTIK,GROSS}>=0;
+var xGBu{GROSS,BUTIK}>=0;
+var xBuB{BUTIK,BRYGG}>=0;
+var xBBu{BRYGG,BUTIK}>=0;
+var xGB{GROSS,BRYGG}>=0;
+var xBuL{BUTIK,LAGER}>=0;
+var xLR{LAGER}>=0;
+var xGR{GROSS}>=0;
+var xBR{BRYGG}>=0; 
+var xTB{FPACK,BRYGG}>=0;  #T=Förpackningar
+var xRM{MATR}>=0;	  #M=råvaror
+var xMT{MATR,FPACK}>=0;
+var xVirgin{MATR}>=0; #oklar
+
+minimize cost:
+#Fasta kostnader gånger tio för att det är fel i uppgiften
+sum{i in GROSS} fkostG[i]*useG[i]+
+sum{i in BRYGG} fkostB[i]*useB[i]+
+sum{i in LAGER} fkostL[i]*useL[i]*10+
+
+#Kostnad hämtning av burkar från butik
+sum{i in BUTIK, j in GROSS} tomkost*distBuG[i,j]*xBuG[i,j]+
+sum{i in BUTIK, j in BRYGG} tomkost*distBuB[i,j]*xBuB[i,j]+
+sum{i in BUTIK, j in LAGER} lagkost*distBuL[i,j]*xBuL[i,j]+
+
+#Kostnad tomma burkar till returpack
+sum{i in GROSS} tomkost*distGR[i]*xGR[i]+
+sum{i in BRYGG} tomkost*distBR[i]*xBR[i]+
+sum{i in LAGER} lagkost*distLR[i]*xLR[i]+
+
+#Kostnad returpack till råvaror
+sum{i in MATR} fullkost*distRM[i]*xRM[i]+
+
+#Kostnad råvaror till förpackning
+sum{i in MATR, j in FPACK} fullkost*distMT[i,j]*xMT[i,j]+
+#kostnad förpackning till bryggeri
+sum{i in FPACK, j in BRYGG} fullkost*distTB[i,j]*xTB[i,j]+
+
+#kostnad bryggeri till butik(kan gå via gross)
+sum{i in GROSS, j in BRYGG} fullkost*distGB[i,j]*xGB[i,j]+
+sum{i in BRYGG, j in BUTIK} fullkost*distBuB[j,i]*xBBu[i,j]+
+sum{i in GROSS, j in BUTIK} fullkost*distBuG[j,i]*xGBu[i,j]+
+
+#kostnad extramaterial
+sum{i in MATR} matrkop*xVirgin[i];
+
+#Bivillkor
+
+#Först flöde med start utflöde till butik tillbaka till butik, sen ej överstiga maxkap
+
+#Räkna med utflöde från butiker
+subject to spill{i in BUTIK}:
+behov[i]-netto[i]=sum{j in GROSS} xBuG[i,j]+ 
+sum{j in BRYGG} xBuB[i,j] + 
+sum{j in LAGER} xBuL[i,j];
+
+#Jämvikter
+
+#Jämvikt för grossist tomma flaskor
+subject to GrossJMV{i in GROSS}:
+sum{j in BUTIK} xBuG[j,i]=xGR[i];
+
+#Jämvikt för Bryggeri tomma flaskor
+subject to BryggJMV{i in BRYGG}:
+sum{j in BUTIK} xBuB[j,i]=xBR[i];
+
+#Jämvikt för Lager tomma flaskor
+subject to LagerJMV{i in LAGER}:
+sum{j in BUTIK} xBuL[j,i]=xLR[i];
+
+#Jämvikt för bryggeri fulla flaskor
+subject to BryggFullJMV{i in BRYGG}:
+sum{j in FPACK} xTB[j,i]=sum{j in BUTIK} xBBu[i,j]+ sum{j in GROSS} xGB[j,i]; 
+
+#Jämvikt för det som skickas till grossist ska skickas till butik
+subject to GrossFullJVM{i in GROSS}:
+sum{j in BRYGG} xGB[i,j]=sum{j in BUTIK} xGBu[i,j];
+
+#Omvandling 
+
+#Från returpack till Råvaro
+subject to omR:
+(sum{i in GROSS} xGR[i] + sum{i in BRYGG} xBR[i] + sum{i in LAGER} xLR[i])*faktR =sum{i in MATR} xRM[i];
+
+#Från råvaru till förpackning
+subject to omM:
+sum{i in MATR} xRM[i]*faktM + sum{i in MATR} xVirgin[i] =sum{i in MATR, j in FPACK} xMT[i,j];
+
+#Från förpackningar till bryggerier
+subject to omF{i in FPACK}:
+sum{j in MATR } xMT[i,j]*faktF=sum{j in BRYGG} xTB[i,j];
+
+#Tillfredsställa butikers behov
+subject to inButik{i in BUTIK}:
+sum{j in GROSS} xGBu[j,i]+sum{j in BRYGG} xBBu[j,i]=behov[i];
+
+#Antalet lager som man får bygga
+subject to maxL:
+sum{i in LAGER} useL[i]<=maxlager;
+
+#För att inte överstiga kapaciteter
+
+#För att inte överskrida kapacitet hos grossist
+subject to grosskaptom{j in GROSS}:
+sum{i in BUTIK} xBuG[i,j]<=gkaptom[j]*useG[j];
+
+#För att inte överskrida kapacitet hos bryggeri
+subject to bryggkaptom{j in BRYGG}:
+sum{i in BUTIK} xBuB[i,j]<=bkaptom[j]*useB[j];
+
+#För att inte överskrida kapacitet hos lager
+subject to lagerkaptom{j in LAGER}:
+sum{i in BUTIK} xBuL[i,j]<=lkaptom[j]*useL[j];
+
+printf "#d butiker, #d grossister, #d bryggerier, #d lager.\n",nbutik,ngross,nbrygg,nlager;
+printf "#d matr, #d fpack.\n",nmatr,nfpack;
+printf "Totalt behov #d, spill #d.\n",totalbehov,totalnetto;
+
+end;
+
+
+
